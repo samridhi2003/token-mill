@@ -10,6 +10,7 @@ import {
   StakingParams,
   VestingParams,
   TokenMillResponse,
+  SwapParams,
 } from "../types/interfaces";
 import { TokenMillType } from "../idl/token_mill";
 
@@ -17,7 +18,7 @@ import { TokenMillType } from "../idl/token_mill";
 dotenv.config();
 
 // Cast the imported IDL to the correct type
-const idl = TokenMillIDL as TokenMillType;
+const idl = TokenMillIDL as unknown as TokenMillType;
 
 /**
  * Parameters for releasing vested tokens
@@ -44,6 +45,7 @@ interface CreateVestingResponse {
 interface ReleaseVestingResponse {
   signature: string;
 }
+
 
 /**
  * Client for interacting with the TokenMill program on Solana.
@@ -155,6 +157,42 @@ export class TokenMillClient {
    *   - quoteTokenMint: Address of quote token mint
    * @returns Object containing market address, base token mint, and transaction signature
    */
+  async lockMarket(market: PublicKey, swapAuthority: PublicKey) {
+    try {
+      const transaction = await this.program.methods
+        .lockMarket(swapAuthority)
+        .accountsPartial({
+          market,
+          creator: this.wallet.publicKey,
+        })
+        .signers([this.wallet])
+        .transaction();
+
+      const transactionSignature = await this.connection.sendTransaction(
+        transaction,
+        [this.wallet]
+      );
+
+      const result = await this.connection.confirmTransaction(
+        transactionSignature
+      );
+
+      if (result.value.err) {
+        console.log("Market lock failed:", result.value.err);
+        throw new Error(`Market lock failed: ${result.value.err}`);
+      }
+
+      console.log(
+        "Market locked successfully with authority:",
+        swapAuthority.toString()
+      );
+      return transactionSignature;
+    } catch (error: any) {
+      console.error("Error locking market:", error);
+      throw error;
+    }
+  }
+
   async createMarket(params: any) {
     const {
       name,
@@ -163,25 +201,18 @@ export class TokenMillClient {
       totalSupply,
       creatorFeeShare,
       stakingFeeShare,
-      quoteTokenMint,
     } = params;
 
     console.log("Wallet:", this.wallet.publicKey.toString());
 
+    // Only wSOL is currently supported as quote token
+    // So11111111111111111111111111111111111111112
+    const quoteTokenMint = new PublicKey("So11111111111111111111111111111111111111112");
+
     try {
-      if (!quoteTokenMint || !PublicKey.isOnCurve(quoteTokenMint)) {
-        throw new Error("Invalid or missing quoteTokenMint");
-      }
+
       const baseTokenMint = Keypair.generate();
 
-      const market = PublicKey.findProgramAddressSync(
-        [Buffer.from("market"), baseTokenMint.publicKey.toBuffer()],
-        this.program.programId
-      )[0];
-      const config = new PublicKey(process.env.TOKEN_MILL_CONFIG_PDA ?? "");
-
-      console.log("Market:", market.toString());
-      console.log("Base Token Mint:", baseTokenMint.publicKey.toString());
       const quoteTokenBadge = PublicKey.findProgramAddressSync(
         [
           Buffer.from("quote_token_badge"),
@@ -190,10 +221,39 @@ export class TokenMillClient {
         ],
         this.program.programId
       )[0];
+
+      const market = PublicKey.findProgramAddressSync(
+        [Buffer.from("market"), baseTokenMint.publicKey.toBuffer()],
+        this.program.programId
+      )[0];
+
+      console.log("Market:", market.toString());
+      console.log("Base Token Mint:", baseTokenMint.publicKey.toString());
       console.log("Quote Token Badge:", quoteTokenBadge.toString());
 
+      // Creating the market requires providing its base token ATA
+      // As the whole token supply is minted and sent to the market account
+      const marketBaseTokenAta = spl.getAssociatedTokenAddressSync(
+        baseTokenMint.publicKey,
+        market,
+        true
+      );
+
+      const metaplexProgramId = new PublicKey(
+        "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+      );
+
+      const baseTokenMetadata = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from("metadata"),
+          metaplexProgramId.toBuffer(),
+          baseTokenMint.publicKey.toBuffer(),
+        ],
+        metaplexProgramId
+      )[0];
+
       const tx = await this.program.methods
-        .createMarket(
+        .createMarketWithSpl(
           name,
           symbol,
           uri,
@@ -205,20 +265,66 @@ export class TokenMillClient {
           config: this.config,
           market: market,
           baseTokenMint: baseTokenMint.publicKey,
+          baseTokenMetadata: baseTokenMetadata,
+          marketBaseTokenAta: marketBaseTokenAta,
           quoteTokenMint: new PublicKey(quoteTokenMint),
           quoteTokenBadge: quoteTokenBadge,
           creator: this.wallet.publicKey,
+
         })
         .signers([baseTokenMint, this.wallet])
         .rpc({
-          commitment: "confirmed",
+          commitment: "finalized",
         });
+
+      console.log("Market created:", market.toString());
+
+
+      const swapAuthority = Keypair.fromSecretKey(
+        bs58.decode(process.env.SWAP_AUTHORITY_KEY!)
+      );
+
+      const swapAuthorityBadge = PublicKey.findProgramAddressSync(
+        [Buffer.from("swap_authority"), market.toBuffer(), swapAuthority.publicKey.toBuffer()],
+        this.program.programId
+      )[0];
+
+
+      const lockTX = await this.program.methods
+        .lockMarket(swapAuthority.publicKey)
+        .accountsPartial({
+          market: market,
+          swapAuthorityBadge: swapAuthorityBadge,
+          creator: this.wallet.publicKey,
+        })
+        .signers([this.wallet])
+        .transaction();
+
+
+      const lockSignature = await this.connection.sendTransaction(
+        lockTX,
+        [this.wallet]
+      );
+
+      const lockResult = await this.connection.confirmTransaction(
+        lockSignature
+      );
+
+      if (lockResult.value.err) {
+        console.log("Market lock failed:", lockResult.value.err);
+        throw new Error(`Market lock failed: ${lockResult.value.err}`);
+      }
+
+      console.log("Market locked successfully with authority:", swapAuthority.publicKey.toString());
+
+      await this.setPrices(market);
 
       return {
         success: true,
         marketAddress: market.toString(),
         baseTokenMint: baseTokenMint.publicKey.toString(),
         signature: tx,
+
       };
     } catch (error: any) {
       console.error("Error creating market:", error);
@@ -226,6 +332,48 @@ export class TokenMillClient {
         success: false,
         error: error.message,
       };
+    }
+  }
+
+
+  /**
+   * Sets the prices for a market.
+   * @param market - The market to set prices for
+   */
+  async setPrices(market: PublicKey) {
+    const bidPrices: BN[] = [];
+    const askPrices: BN[] = [];
+
+
+    for (let i = 0; i < 11; i++) {
+      bidPrices.push(new BN(i * 9e5));
+      askPrices.push(new BN(i * 1e6));
+    }
+
+    const transaction = await this.program.methods
+      .setMarketPrices(bidPrices, askPrices)
+      .accountsPartial({
+        market: market,
+        creator: this.wallet.publicKey,
+      })
+      .signers([this.wallet])
+      .transaction();
+
+
+    const transactionSignature = await this.connection.sendTransaction(
+      transaction,
+      [this.wallet]
+    );
+
+    const result = await this.connection.confirmTransaction(
+      transactionSignature
+    );
+
+    console.log("Prices set successfully");
+
+    if (result.value.err) {
+      console.log("Set prices failed:", result.value.err);
+      process.exit(1);
     }
   }
 
@@ -381,14 +529,18 @@ export class TokenMillClient {
    *   - cliffDuration: Optional cliff duration in seconds
    * @returns TokenMillResponse containing vesting account address and transaction signature
    */
-  async createVesting(params: VestingParams): Promise<TokenMillResponse<CreateVestingResponse>> {
+  async createVesting(
+    params: VestingParams
+  ): Promise<TokenMillResponse<CreateVestingResponse>> {
     try {
       // Initialize key variables
       const marketPubkey = new PublicKey(params.marketAddress);
       const recipientPubkey = new PublicKey(params.recipient);
       const vestingAccount = Keypair.generate();
 
-      const marketAccount = await this.program.account.market.fetch(marketPubkey);
+      const marketAccount = await this.program.account.market.fetch(
+        marketPubkey
+      );
       const baseTokenMint = marketAccount.baseTokenMint;
 
       console.log("Base Token Mint:", baseTokenMint.toString());
@@ -402,10 +554,14 @@ export class TokenMillClient {
         spl.ASSOCIATED_TOKEN_PROGRAM_ID
       );
 
-      
       // Get user base token balance
-      const userBaseTokenBalance = await this.connection.getTokenAccountBalance(userBaseTokenAta);
-      console.log("User Base Token Balance:", userBaseTokenBalance.value.uiAmount);
+      const userBaseTokenBalance = await this.connection.getTokenAccountBalance(
+        userBaseTokenAta
+      );
+      console.log(
+        "User Base Token Balance:",
+        userBaseTokenBalance.value.uiAmount
+      );
 
       const marketBaseTokenAta = spl.getAssociatedTokenAddressSync(
         baseTokenMint,
@@ -416,7 +572,9 @@ export class TokenMillClient {
       );
 
       // Create user ATA if needed
-      const doesUserHaveBaseTokenATA = await this.connection.getAccountInfo(userBaseTokenAta);
+      const doesUserHaveBaseTokenATA = await this.connection.getAccountInfo(
+        userBaseTokenAta
+      );
       console.log("Does User Have Base Token ATA:", doesUserHaveBaseTokenATA);
       if (!doesUserHaveBaseTokenATA) {
         await spl.createAssociatedTokenAccount(
@@ -437,7 +595,9 @@ export class TokenMillClient {
         this.program.programId
       )[0];
 
-      const stakePositionAccountInfo = await this.connection.getAccountInfo(staking);
+      const stakePositionAccountInfo = await this.connection.getAccountInfo(
+        staking
+      );
       console.log("Stake Position Account Info:", stakePositionAccountInfo);
 
       await this.setupStakingIfNeeded(staking, marketPubkey);
@@ -484,7 +644,10 @@ export class TokenMillClient {
   /**
    * Sets up staking for a market if not already configured
    */
-  private async setupStakingIfNeeded(staking: PublicKey, market: PublicKey): Promise<void> {
+  private async setupStakingIfNeeded(
+    staking: PublicKey,
+    market: PublicKey
+  ): Promise<void> {
     const stakingAccountInfo = await this.connection.getAccountInfo(staking);
     if (!stakingAccountInfo) {
       const transaction = await this.program.methods
@@ -497,7 +660,9 @@ export class TokenMillClient {
         .signers([this.wallet])
         .transaction();
 
-      const signature = await this.connection.sendTransaction(transaction, [this.wallet]);
+      const signature = await this.connection.sendTransaction(transaction, [
+        this.wallet,
+      ]);
       const result = await this.connection.confirmTransaction(signature);
 
       if (result.value.err) {
@@ -511,7 +676,9 @@ export class TokenMillClient {
    */
   private async setupStakePositionIfNeeded(market: PublicKey): Promise<void> {
     const stakePosition = await this.getStakePositionAddress(market);
-    const stakePositionInfo = await this.connection.getAccountInfo(stakePosition);
+    const stakePositionInfo = await this.connection.getAccountInfo(
+      stakePosition
+    );
 
     if (!stakePositionInfo) {
       const transaction = await this.program.methods
@@ -524,7 +691,9 @@ export class TokenMillClient {
         .signers([this.wallet])
         .transaction();
 
-      const signature = await this.connection.sendTransaction(transaction, [this.wallet]);
+      const signature = await this.connection.sendTransaction(transaction, [
+        this.wallet,
+      ]);
       const result = await this.connection.confirmTransaction(signature);
 
       if (result.value.err) {
@@ -557,7 +726,9 @@ export class TokenMillClient {
    *   - baseTokenMint: Token mint address
    * @returns TokenMillResponse containing transaction signature
    */
-  async releaseVesting(params: ReleaseVestingParams): Promise<TokenMillResponse<ReleaseVestingResponse>> {
+  async releaseVesting(
+    params: ReleaseVestingParams
+  ): Promise<TokenMillResponse<ReleaseVestingResponse>> {
     try {
       const marketPubkey = new PublicKey(params.marketAddress);
       const baseTokenMintPubkey = new PublicKey(params.baseTokenMint);
@@ -636,5 +807,132 @@ export class TokenMillClient {
       [Buffer.from("market_staking"), market.toBuffer()],
       this.program.programId
     )[0];
+  }
+
+  async executeSwap({
+    market,
+    quoteTokenMint,
+    action,
+    tradeType,
+    amount,
+    otherAmountThreshold
+  }: SwapParams) {
+    try {
+      // Fetch market and config accounts
+      const marketPubkey = new PublicKey(market);
+      const marketAccount = await this.program.account.market.fetch(marketPubkey);
+      const config = marketAccount.config;
+      const baseTokenMint = marketAccount.baseTokenMint;
+
+
+      console.log("baseTokenMint", baseTokenMint);
+
+      // Get ATAs
+
+      const marketBaseTokenAta = await spl.getOrCreateAssociatedTokenAccount(
+        this.connection,
+        this.wallet,
+        baseTokenMint,
+        new PublicKey(market),
+        true
+      );
+
+      console.log("marketBaseTokenAta", marketBaseTokenAta);
+
+      const userBaseTokenAta = await spl.getOrCreateAssociatedTokenAccount(
+        this.connection,
+        this.wallet,
+        baseTokenMint,
+        this.wallet.publicKey,
+        true
+      );
+
+      console.log("userBaseTokenAta", userBaseTokenAta);
+
+      const marketQuoteTokenAta = await spl.getOrCreateAssociatedTokenAccount(
+        this.connection,
+        this.wallet,
+        new PublicKey(quoteTokenMint),
+        new PublicKey(market),
+        true
+      );
+
+      console.log("marketQuoteTokenAta", marketQuoteTokenAta);
+
+      const userQuoteTokenAta = await spl.getOrCreateAssociatedTokenAccount(
+        this.connection,
+        this.wallet,
+        new PublicKey(quoteTokenMint),
+        this.wallet.publicKey
+      );
+
+      console.log("userQuoteTokenAta", userQuoteTokenAta);
+      const configAccount = await this.program.account.tokenMillConfig.fetch(config);
+      const protocolQuoteTokenAta = await spl.getOrCreateAssociatedTokenAccount(
+        this.connection,
+        this.wallet,
+        new PublicKey(quoteTokenMint),
+        configAccount.protocolFeeRecipient
+      );
+
+      console.log("protocolQuoteTokenAta", protocolQuoteTokenAta);
+
+      const swap_authority = Keypair.fromSecretKey(bs58.decode(process.env.SWAP_AUTHORITY_KEY!));
+      const swapAuthorityBadge = PublicKey.findProgramAddressSync(
+        [Buffer.from("swap_authority"), marketPubkey.toBuffer(), swap_authority.publicKey.toBuffer()],
+        this.program.programId
+      )[0];
+
+
+
+      // Build and send transaction
+      const transaction = await this.program.methods
+        .permissionedSwap(
+          action === 'buy' ? { buy: {} } : { sell: {} },
+          tradeType === 'exactInput' ? { exactInput: {} } : { exactOutput: {} },
+          new BN(amount),
+          new BN(otherAmountThreshold)
+        )
+        .accountsPartial({
+          config,
+          market: new PublicKey(market),
+          baseTokenMint,
+          quoteTokenMint: new PublicKey(quoteTokenMint),
+          marketBaseTokenAta: marketBaseTokenAta.address,
+          marketQuoteTokenAta: marketQuoteTokenAta.address,
+          userBaseTokenAccount: userBaseTokenAta.address,
+          userQuoteTokenAccount: userQuoteTokenAta.address,
+          protocolQuoteTokenAta: protocolQuoteTokenAta.address,
+          referralTokenAccount: this.program.programId,
+          swapAuthority: swap_authority.publicKey,
+          swapAuthorityBadge: swapAuthorityBadge,
+          user: this.wallet.publicKey,
+          baseTokenProgram: spl.TOKEN_PROGRAM_ID,
+          quoteTokenProgram: spl.TOKEN_PROGRAM_ID,
+
+        })
+        .signers([this.wallet, swap_authority])
+        .transaction();
+
+      const signature = await this.connection.sendTransaction(transaction, [
+        this.wallet,
+        swap_authority
+      ]);
+
+      const confirmation = await this.connection.confirmTransaction(signature);
+
+      if (confirmation.value.err) {
+        throw new Error(`Transaction failed: ${confirmation.value.err}`);
+      }
+
+      return {
+        success: true,
+        signature,
+        message: "Swap executed successfully",
+      };
+    } catch (error: any) {
+      console.error(error);
+      throw new Error(`Failed to execute swap: ${error.message}`);
+    }
   }
 }

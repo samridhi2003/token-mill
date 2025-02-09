@@ -40,16 +40,6 @@ export interface Market {
 }
 
 /**
- * Parameters for swap operations
- */
-export interface SwapParams {
-  /** Amount to swap */
-  amount: string | number;
-  /** Whether amount is input (true) or output (false) */
-  isExactIn: boolean;
-}
-
-/**
  * Parameters for staking operations
  */
 export interface StakingParams {
@@ -127,6 +117,14 @@ export interface VestingSchedule {
   duration: number;
   /** Cliff duration in seconds */
   cliffDuration: number;
+}
+export interface SwapParams {
+  market: string;
+  quoteTokenMint: string;
+  action: 'buy' | 'sell';
+  tradeType: 'exactInput' | 'exactOutput';
+  amount: number;
+  otherAmountThreshold: number;
 }
 
 /**

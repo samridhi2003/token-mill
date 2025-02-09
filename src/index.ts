@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import { TokenMillClient } from './utils/tokenMill';
-import { MarketParams, StakingParams, TokenParams, VestingParams } from './types/interfaces';
+import { MarketParams, StakingParams, SwapParams, TokenParams, VestingParams } from './types/interfaces';
 import { PublicKey } from '@solana/web3.js';
 
 /**
@@ -94,6 +94,52 @@ app.post('/api/tokens', async (req: Request<{}, {}, TokenParams>, res: Response)
       });
     }
   });
+  app.post('/api/swap', async (req: Request, res: Response):Promise<any> => {
+    try{
+      const { 
+        action, 
+        tradeType, 
+        amount, 
+        otherAmountThreshold, 
+        market, 
+        quoteTokenMint } = req.body as SwapParams;
+    
+        // Calculate otherAmountThreshold if not provided
+        const calculatedThreshold = otherAmountThreshold ?? (
+          action === "buy" 
+            ? Math.floor(amount * 0.99)  // 1% slippage for buy
+            : Math.floor(amount * 1.01)  // 1% slippage for sell
+        );
+    
+    const result = await tokenMill.executeSwap({
+      market: market,
+      quoteTokenMint: quoteTokenMint,
+      action,
+      tradeType,
+      amount,
+      otherAmountThreshold: calculatedThreshold
+    });
+    return res.status(200).json({
+      success: true,
+      signature: result.signature,
+      message: "Swap executed successfully",
+      details: {
+        action,
+        tradeType,
+        amount,
+        otherAmountThreshold: calculatedThreshold,
+        market,
+        quoteTokenMint
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+
+});
   
 /**
  * Create a new staking position
