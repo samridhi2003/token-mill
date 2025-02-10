@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import { TokenMillClient } from './utils/tokenMill';
-import { MarketParams, StakingParams, SwapParams, TokenParams, VestingParams } from './types/interfaces';
+import { MarketParams, StakingParams, SwapParams, TokenParams, VestingParams, FreeMarketParams } from './types/interfaces';
 import { PublicKey } from '@solana/web3.js';
 
 /**
@@ -76,6 +76,33 @@ app.post('/api/markets', async (req: Request<{}, {}, MarketParams>, res: Respons
     });
   }
 });
+app.post("/api/free-market", async (req: express.Request, res: express.Response):Promise<any> => {
+  try {
+    const { market } = req.body as FreeMarketParams;
+
+    // Validate required parameter
+    if (!market) {
+      return res.status(400).json({
+        success: false,
+        message: "Market address is required",
+      });
+    }
+
+    const tokenMillClient = new TokenMillClient();
+    const result = await tokenMillClient.freeMarket(market);
+
+    return res.status(200).json(result);
+
+  } catch (error: any) {
+    console.error("Free market error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to free market",
+      error: error.message,
+    });
+  }
+});
+
 
 /**
  * Create a new token

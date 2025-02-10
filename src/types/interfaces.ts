@@ -38,6 +38,16 @@ export interface Market {
   /** Total supply of tokens */
   totalSupply: BN;
 }
+export interface FreeMarketParams {
+  market: string;
+}
+
+export interface FreeMarketResponse {
+  success: boolean;
+  signature?: string;
+  message: string;
+  error?: string;
+}
 
 /**
  * Parameters for staking operations

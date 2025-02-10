@@ -376,6 +376,60 @@ export class TokenMillClient {
       process.exit(1);
     }
   }
+  async freeMarket(market: string): Promise<{ success: boolean; signature?: string; message: string; }> {
+    try {
+      // Validate market address
+      if (!market) {
+        throw new Error("Market address is required");
+      }
+      const marketPubkey = new PublicKey(market);
+    
+    // Fetch market account
+    const marketAccount = await this.program.account.market.fetch(marketPubkey);
+
+    // Get swap authority
+    const swapAuthorityKeypair = Keypair.fromSecretKey(
+      bs58.decode(process.env.SWAP_AUTHORITY_KEY!)
+    );
+    const swapAuthority = swapAuthorityKeypair.publicKey;
+    console.log("Swap Authority Public Key:", swapAuthority.toString());
+    const [swapAuthorityBadge] = PublicKey.findProgramAddressSync(
+      [Buffer.from("swap_authority"), marketPubkey.toBuffer()],
+      this.program.programId
+    );
+      // Build and send transaction
+      const transaction = await this.program.methods
+        .freeMarket()
+        .accountsPartial({
+          market,
+          swapAuthority,
+        })
+        .signers([this.wallet, swapAuthorityKeypair])
+        .transaction();
+  
+      const signature = await this.connection.sendTransaction(transaction, [
+        this.wallet,
+        swapAuthorityKeypair
+      ]);
+  
+      const confirmation = await this.connection.confirmTransaction(signature);
+  
+      if (confirmation.value.err) {
+        throw new Error(`Transaction failed: ${confirmation.value.err}`);
+      }
+  
+      return {
+        success: true,
+        signature,
+        message: "Market freed successfully",
+      };
+  
+    } catch (error: any) {
+      console.error("Failed to free market:", error);
+      throw new Error(`Failed to free market: ${error.message}`);
+    }
+  }
+
 
   /**
    * Creates a new token with associated market.
