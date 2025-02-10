@@ -74,6 +74,7 @@ npm run build
 - `POST /api/vesting/:marketAddress/claim` - Claim vested tokens
   - Required params: marketAddress
   - Required body: Claim parameters
+- `POST /api/swap` - Excutes swap using swap authority 
 
 ## Project Structure
 
