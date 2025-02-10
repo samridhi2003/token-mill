@@ -75,6 +75,7 @@ npm run build
   - Required params: marketAddress
   - Required body: Claim parameters
 - `POST /api/swap` - Excutes swap using swap authority 
+- `POST /api/free-market - Unlocks the market
 
 ## Project Structure
 
