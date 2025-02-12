@@ -47,6 +47,8 @@ export interface FreeMarketResponse {
   signature?: string;
   message: string;
   error?: string;
+  swapAuthority?: string;
+  baseTokenBalance?: number;
 }
 
 /**
@@ -135,6 +137,21 @@ export interface SwapParams {
   tradeType: 'exactInput' | 'exactOutput';
   amount: number;
   otherAmountThreshold: number;
+}
+export interface TokenMetadata {
+  mint: string;
+  metadataAddress: string;
+  supply: string;
+  decimals: number;
+  name?: string;
+  symbol?: string;
+  uri?: string;
+}
+
+export interface TokenMetadataResponse {
+  success: boolean;
+  data?: TokenMetadata;
+  error?: string;
 }
 
 /**

@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import { TokenMillClient } from './utils/tokenMill';
-import { MarketParams, StakingParams, SwapParams, TokenParams, VestingParams, FreeMarketParams } from './types/interfaces';
+import { MarketParams, StakingParams, SwapParams, TokenParams, VestingParams, FreeMarketParams, TokenMetadata } from './types/interfaces';
 import { PublicKey } from '@solana/web3.js';
 
 /**
@@ -216,6 +216,33 @@ app.post('/api/vesting/:marketAddress/claim', async (req: Request<{ marketAddres
       res.status(500).json({
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+  app.get("/api/token-metadata", async (req: express.Request, res: express.Response):Promise<any> => {
+    try {
+      const { mint } = req.query;
+  
+      if (!mint || typeof mint !== "string") {
+        return res.status(400).json({
+          success: false,
+          error: "Token mint address is required",
+        });
+      }
+  
+      const tokenMillClient = new TokenMillClient();
+      const metadata = await tokenMillClient.getTokenMetadata(mint);
+  
+      return res.status(200).json({
+        success: true,
+        data: metadata,
+      });
+  
+    } catch (error: any) {
+      console.error("Token metadata error:", error);
+      return res.status(500).json({
+        success: false,
+        error: error.message,
       });
     }
   });
