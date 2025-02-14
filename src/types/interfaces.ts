@@ -153,6 +153,10 @@ export interface TokenMetadataResponse {
   data?: TokenMetadata;
   error?: string;
 }
+export interface SwapAmounts {
+  inputAmount: number;
+  outputAmount: number;
+}
 
 /**
  * Generic response wrapper for TokenMill operations

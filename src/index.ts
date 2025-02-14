@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import { TokenMillClient } from './utils/tokenMill';
-import { MarketParams, StakingParams, SwapParams, TokenParams, VestingParams, FreeMarketParams, TokenMetadata } from './types/interfaces';
+import { MarketParams, StakingParams, SwapParams, TokenParams, VestingParams, FreeMarketParams, TokenMetadata, SwapAmounts } from './types/interfaces';
 import { PublicKey } from '@solana/web3.js';
 
 /**
@@ -219,33 +219,32 @@ app.post('/api/vesting/:marketAddress/claim', async (req: Request<{ marketAddres
       });
     }
   });
-  app.get("/api/token-metadata", async (req: express.Request, res: express.Response):Promise<any> => {
+  app.post('/api/quote-swap', async (req: Request, res: Response):Promise<any> => { 
+    try{ 
+      const result = await tokenMill.quoteSwap(req.body); 
+      res.json(result); 
+    }catch(error){ 
+      res.status(500).json({ 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown error' 
+      }); 
+    } 
+  });
+  app.post("/api/get-asset", async (req: Request, res: Response):Promise<any> => {
+    const { assetId } = req.body;
+  
+    if (!assetId) {
+      return res.status(400).json({ error: "Asset ID is required" });
+    }
+  
     try {
-      const { mint } = req.query;
-  
-      if (!mint || typeof mint !== "string") {
-        return res.status(400).json({
-          success: false,
-          error: "Token mint address is required",
-        });
-      }
-  
-      const tokenMillClient = new TokenMillClient();
-      const metadata = await tokenMillClient.getTokenMetadata(mint);
-  
-      return res.status(200).json({
-        success: true,
-        data: metadata,
-      });
-  
+      const metadata = await tokenMill.getAssetMetadata(assetId);
+      res.json(metadata);
     } catch (error: any) {
-      console.error("Token metadata error:", error);
-      return res.status(500).json({
-        success: false,
-        error: error.message,
-      });
+      res.status(500).json({ error: error.message });
     }
   });
+
 
 /**
  * Start the Express server
