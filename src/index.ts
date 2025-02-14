@@ -244,6 +244,17 @@ app.post('/api/vesting/:marketAddress/claim', async (req: Request<{ marketAddres
       res.status(500).json({ error: error.message });
     }
   });
+  app.get("/api/graduation", async (req: Request, res: Response):Promise<any> => { 
+    try { 
+      const result = await tokenMill.getGraduation(req.body.market); 
+      res.json(result); 
+    } catch (error) { 
+      res.status(500).json({ 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown error' 
+      }); 
+    } 
+  });  
 
 
 /**

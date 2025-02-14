@@ -12,10 +12,11 @@ import {
   TokenMillResponse,
   SwapParams,
   TokenMetadata,
-  SwapAmounts
+  SwapAmounts,
 } from "../types/interfaces";
 import { TokenMillType } from "../idl/token_mill";
 import axios from "axios";
+import { LAMPORTS_PER_SOL } from "@solana/web3.js";
 
 // Initialize dotenv
 dotenv.config();
@@ -1120,11 +1121,11 @@ export class TokenMillClient {
       throw new Error(`Failed to execute swap: ${error.message}`);
     }
   }
-  async  getAssetMetadata(assetId: string) {
+  async getAssetMetadata(assetId: string) {
     if (!process.env.RPC_URL) {
       throw new Error("RPC_URL is not set in environment variables.");
     }
-  
+
     try {
       const response = await axios.post(process.env.RPC_URL, {
         jsonrpc: "2.0",
@@ -1132,62 +1133,64 @@ export class TokenMillClient {
         method: "getAsset",
         params: { id: assetId },
       });
-  
+
       // Check for asset not found error
       if (response.data.error?.message?.includes("Asset Not Found")) {
         throw new Error(`Asset with ID ${assetId} was not found.`);
       }
-  
+
       return response.data;
     } catch (error: any) {
-      console.error("Error fetching asset metadata:", error.response?.data || error.message);
-      throw new Error(error.response?.data?.error?.message || "Failed to fetch asset metadata.");
+      console.error(
+        "Error fetching asset metadata:",
+        error.response?.data || error.message
+      );
+      throw new Error(
+        error.response?.data?.error?.message ||
+          "Failed to fetch asset metadata."
+      );
     }
   }
-  
+
   private parseSwapAmounts(returnData: any) {
     if (!returnData || !returnData.data) {
-        console.log("Invalid or missing return data:", returnData);
-        return { inputAmount: 0, outputAmount: 0 };
+      console.log("Invalid or missing return data:", returnData);
+      return { inputAmount: 0, outputAmount: 0 };
     }
 
     try {
-        const buffer = Buffer.from(returnData.data[0], "base64");
-        console.log("Decoded buffer:", buffer.toString("hex"));
-        console.log("Decoded buffer length:", buffer.length);
+      const buffer = Buffer.from(returnData.data[0], "base64");
+      console.log("Decoded buffer:", buffer.toString("hex"));
+      console.log("Decoded buffer length:", buffer.length);
 
-        // Safety check for 16 bytes
-        if (buffer.length < 16) {
-            console.log("Buffer too short, returning default values");
-            return { inputAmount: 0, outputAmount: 0 };
-        }
-
-        let inputAmount: bigint;
-        let outputAmount: bigint;
-
-        try {
-            // Assuming the new structure: first 8 bytes = input, last 8 bytes = output
-            inputAmount = buffer.readBigUInt64LE(0);  // Starts at 0
-            outputAmount = buffer.readBigUInt64LE(8); // Starts at 8
-        } catch (error) {
-            console.log("Error reading buffer:", error);
-            return { inputAmount: 0, outputAmount: 0 };
-        }
-
-        return {
-            inputAmount: Number(inputAmount),
-            outputAmount: Number(outputAmount),
-        };
-    } catch (error) {
-        console.log("Error parsing return data:", error);
+      // Safety check for 16 bytes
+      if (buffer.length < 16) {
+        console.log("Buffer too short, returning default values");
         return { inputAmount: 0, outputAmount: 0 };
+      }
+
+      let baseAmount: bigint;
+      let quoteAmount: bigint;
+
+      try {
+        // Assuming the new structure: first 8 bytes = input, last 8 bytes = output
+        baseAmount = buffer.readBigUInt64LE(0); // Starts at 0
+        quoteAmount = buffer.readBigUInt64LE(8); // Starts at 8
+      } catch (error) {
+        console.log("Error reading buffer:", error);
+        return { inputAmount: 0, outputAmount: 0 };
+      }
+
+      return {
+        baseAmount: Number(baseAmount),
+        quoteAmount: Number(quoteAmount),
+      };
+    } catch (error) {
+      console.log("Error parsing return data:", error);
+      return { inputAmount: 0, outputAmount: 0 };
     }
-}
+  }
 
-
-
-
-  
   async quoteSwap({
     market,
     quoteTokenMint,
@@ -1211,7 +1214,6 @@ export class TokenMillClient {
       );
 
       console.log("baseTokenMint", baseTokenMint);
-      
 
       // Get ATAs
 
@@ -1294,65 +1296,117 @@ export class TokenMillClient {
         ],
         this.program.programId
       )[0];
-        const transaction = await this.program.methods
-          .permissionedSwap(
-            action === "buy" ? { buy: {} } : { sell: {} },
-            tradeType === "exactInput"
-              ? { exactInput: {} }
-              : { exactOutput: {} },
-            new BN(amount),
-            new BN(otherAmountThreshold)
-          )
-          .accountsPartial({
-            config,
-            market: new PublicKey(market),
-            baseTokenMint,
-            quoteTokenMint: new PublicKey(quoteTokenMint),
-            marketBaseTokenAta: marketBaseTokenAta.address,
-            marketQuoteTokenAta: marketQuoteTokenAta.address,
-            userBaseTokenAccount: userBaseTokenAta.address,
-            userQuoteTokenAccount: userQuoteTokenAta.address,
-            protocolQuoteTokenAta: protocolQuoteTokenAta.address,
-            referralTokenAccount: this.program.programId,
-            swapAuthority: swap_authority.publicKey,
-            swapAuthorityBadge: swapAuthorityBadge,
-            user: this.wallet.publicKey,
-            baseTokenProgram: spl.TOKEN_PROGRAM_ID,
-            quoteTokenProgram: spl.TOKEN_PROGRAM_ID,
-          })
-          .signers([this.wallet, swap_authority])
-          .transaction();
+      const transaction = await this.program.methods
+        .permissionedSwap(
+          action === "buy" ? { buy: {} } : { sell: {} },
+          tradeType === "exactInput" ? { exactInput: {} } : { exactOutput: {} },
+          new BN(amount),
+          new BN(otherAmountThreshold)
+        )
+        .accountsPartial({
+          config,
+          market: new PublicKey(market),
+          baseTokenMint,
+          quoteTokenMint: new PublicKey(quoteTokenMint),
+          marketBaseTokenAta: marketBaseTokenAta.address,
+          marketQuoteTokenAta: marketQuoteTokenAta.address,
+          userBaseTokenAccount: userBaseTokenAta.address,
+          userQuoteTokenAccount: userQuoteTokenAta.address,
+          protocolQuoteTokenAta: protocolQuoteTokenAta.address,
+          referralTokenAccount: this.program.programId,
+          swapAuthority: swap_authority.publicKey,
+          swapAuthorityBadge: swapAuthorityBadge,
+          user: this.wallet.publicKey,
+          baseTokenProgram: spl.TOKEN_PROGRAM_ID,
+          quoteTokenProgram: spl.TOKEN_PROGRAM_ID,
+        })
+        .signers([this.wallet, swap_authority])
+        .transaction();
 
-          const simulation = await this.connection.simulateTransaction(transaction, [
-            this.wallet,
-            swap_authority,
-          ]);
-          console.log('Simulation data:', {
-            err: simulation.value.err,
-            logs: simulation.value.logs,
-            returnData: simulation.value.returnData
-          });
-          
-          const data = simulation.value.returnData;
-          if (data) {
-            const { inputAmount, outputAmount } = this.parseSwapAmounts(data);
-            console.log(`Swap amounts - Input: ${inputAmount}, Output: ${outputAmount}`);
-          }
-        
+      const simulation = await this.connection.simulateTransaction(
+        transaction,
+        [this.wallet, swap_authority]
+      );
+      console.log("Simulation data:", {
+        err: simulation.value.err,
+        logs: simulation.value.logs,
+        returnData: simulation.value.returnData,
+      });
 
-        // TODO: Parse the data to get the input and output amounts
+      const data = simulation.value.returnData;
+      if (data) {
+        const { baseAmount, quoteAmount } = this.parseSwapAmounts(data);
+        console.log(
+          `Swap amounts - baseAmount: ${baseAmount}, quoteAmount: ${quoteAmount}`
+        );
+      }
 
-        if (simulation.value.err) {
-          throw new Error(`Transaction failed: ${simulation.value.err}`);
-        }
-        return {
-          success: true,
-          simulation,
-          message: "Swap executed successfully",
-        };
+      // TODO: Parse the data to get the input and output amounts
+
+      if (simulation.value.err) {
+        throw new Error(`Transaction failed: ${simulation.value.err}`);
+      }
+      return {
+        success: true,
+        simulation,
+        message: "Swap executed successfully",
+      };
     } catch (error: any) {
       console.error(error);
       throw new Error(`Failed to execute swap: ${error.message}`);
     }
+  }
+  async getGraduation(market: string) { 
+    try { 
+      const GRADUTATION_THRESHOLD = 60 * LAMPORTS_PER_SOL; 
+      const marketPubkey = new PublicKey(market); 
+      const marketAccount = await this.program.account.market.fetch( 
+        marketPubkey 
+      ); 
+      const config = marketAccount.config; 
+      const baseTokenMint = marketAccount.baseTokenMint; 
+      const quoteTokenMint = marketAccount.quoteTokenMint; 
+ 
+      const marketBaseTokenAta = await spl.getOrCreateAssociatedTokenAccount( 
+        this.connection, 
+        this.wallet, 
+        baseTokenMint, 
+        new PublicKey(market), 
+        true 
+      ); 
+      const marketQuoteTokenAta = await spl.getOrCreateAssociatedTokenAccount( 
+        this.connection, 
+        this.wallet, 
+        quoteTokenMint, 
+        new PublicKey(market), 
+        true 
+      ); 
+      const baseTokenBalance = await this.connection.getTokenAccountBalance( 
+        marketBaseTokenAta.address 
+      ); 
+ 
+      const quoteTokenBalance = await this.connection.getTokenAccountBalance( 
+        marketQuoteTokenAta.address 
+      ); 
+ 
+      const baseTokenBalanceNumber = Number(baseTokenBalance.value.uiAmount); 
+      const quoteTokenBalanceNumber = Number(quoteTokenBalance.value.uiAmount); 
+ 
+      const info = await this.getAssetMetadata(baseTokenMint.toBase58()); 
+ 
+      const graduationData = { 
+        baseTokenBalance: baseTokenBalanceNumber, 
+        quoteTokenBalance: quoteTokenBalanceNumber, 
+        tokenInfo: info.result.content.metadata, 
+        graduation: quoteTokenBalanceNumber >= GRADUTATION_THRESHOLD, 
+        graudation_percentage: ((quoteTokenBalanceNumber / GRADUTATION_THRESHOLD) * 100).toFixed(6), 
+      }; 
+ 
+      return graduationData; 
+         
+    } catch (error: any) { 
+      console.error(error); 
+      throw new Error(`Failed to get graduation: ${error.message}`); 
+    } 
   }
 }
