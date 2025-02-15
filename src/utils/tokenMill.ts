@@ -340,13 +340,21 @@ export class TokenMillClient {
    * @param market - The market to set prices for
    */
   async setPrices(market: PublicKey) {
-    const bidPrices: BN[] = [];
-    const askPrices: BN[] = [];
+    const askPrices: BN[] = [
+      new BN(28), // 2.8e-8
+      new BN(29), // 2.9e-8
+      new BN(32), // 3.2e-8
+      new BN(47), // 4.7e-8
+      new BN(110), // 1.1e-7
+      new BN(380), // 3.8e-7
+      new BN(1500), // 1.5e-6
+      new BN(6400), // 6.4e-6
+      new BN(27000), // 2.7e-5
+      new BN(120000), // 1.2e-4
+      new BN(500000), // 5e-4
+    ];
 
-    for (let i = 0; i < 11; i++) {
-      bidPrices.push(new BN(i * 9e5));
-      askPrices.push(new BN(i * 1e6));
-    }
+    const bidPrices: BN[] = askPrices.map((price) => price.muln(99).divn(100));
 
     const transaction = await this.program.methods
       .setMarketPrices(bidPrices, askPrices)
@@ -1356,57 +1364,59 @@ export class TokenMillClient {
       throw new Error(`Failed to execute swap: ${error.message}`);
     }
   }
-  async getGraduation(market: string) { 
-    try { 
-      const GRADUTATION_THRESHOLD = 60 * LAMPORTS_PER_SOL; 
-      const marketPubkey = new PublicKey(market); 
-      const marketAccount = await this.program.account.market.fetch( 
-        marketPubkey 
-      ); 
-      const config = marketAccount.config; 
-      const baseTokenMint = marketAccount.baseTokenMint; 
-      const quoteTokenMint = marketAccount.quoteTokenMint; 
- 
-      const marketBaseTokenAta = await spl.getOrCreateAssociatedTokenAccount( 
-        this.connection, 
-        this.wallet, 
-        baseTokenMint, 
-        new PublicKey(market), 
-        true 
-      ); 
-      const marketQuoteTokenAta = await spl.getOrCreateAssociatedTokenAccount( 
-        this.connection, 
-        this.wallet, 
-        quoteTokenMint, 
-        new PublicKey(market), 
-        true 
-      ); 
-      const baseTokenBalance = await this.connection.getTokenAccountBalance( 
-        marketBaseTokenAta.address 
-      ); 
- 
-      const quoteTokenBalance = await this.connection.getTokenAccountBalance( 
-        marketQuoteTokenAta.address 
-      ); 
- 
-      const baseTokenBalanceNumber = Number(baseTokenBalance.value.uiAmount); 
-      const quoteTokenBalanceNumber = Number(quoteTokenBalance.value.uiAmount); 
- 
-      const info = await this.getAssetMetadata(baseTokenMint.toBase58()); 
- 
-      const graduationData = { 
-        baseTokenBalance: baseTokenBalanceNumber, 
-        quoteTokenBalance: quoteTokenBalanceNumber, 
-        tokenInfo: info.result.content.metadata, 
-        graduation: quoteTokenBalanceNumber >= GRADUTATION_THRESHOLD, 
-        graudation_percentage: ((quoteTokenBalanceNumber / GRADUTATION_THRESHOLD) * 100).toFixed(6), 
-      }; 
- 
-      return graduationData; 
-         
-    } catch (error: any) { 
-      console.error(error); 
-      throw new Error(`Failed to get graduation: ${error.message}`); 
-    } 
+  async getGraduation(market: string) {
+    try {
+      const GRADUTATION_THRESHOLD = 60 * LAMPORTS_PER_SOL;
+      const marketPubkey = new PublicKey(market);
+      const marketAccount = await this.program.account.market.fetch(
+        marketPubkey
+      );
+      const config = marketAccount.config;
+      const baseTokenMint = marketAccount.baseTokenMint;
+      const quoteTokenMint = marketAccount.quoteTokenMint;
+
+      const marketBaseTokenAta = await spl.getOrCreateAssociatedTokenAccount(
+        this.connection,
+        this.wallet,
+        baseTokenMint,
+        new PublicKey(market),
+        true
+      );
+      const marketQuoteTokenAta = await spl.getOrCreateAssociatedTokenAccount(
+        this.connection,
+        this.wallet,
+        quoteTokenMint,
+        new PublicKey(market),
+        true
+      );
+      const baseTokenBalance = await this.connection.getTokenAccountBalance(
+        marketBaseTokenAta.address
+      );
+
+      const quoteTokenBalance = await this.connection.getTokenAccountBalance(
+        marketQuoteTokenAta.address
+      );
+
+      const baseTokenBalanceNumber = Number(baseTokenBalance.value.uiAmount);
+      const quoteTokenBalanceNumber = Number(quoteTokenBalance.value.uiAmount);
+
+      const info = await this.getAssetMetadata(baseTokenMint.toBase58());
+
+      const graduationData = {
+        baseTokenBalance: baseTokenBalanceNumber,
+        quoteTokenBalance: quoteTokenBalanceNumber,
+        tokenInfo: info.result.content.metadata,
+        graduation: quoteTokenBalanceNumber >= GRADUTATION_THRESHOLD,
+        graudation_percentage: (
+          (quoteTokenBalanceNumber / GRADUTATION_THRESHOLD) *
+          100
+        ).toFixed(6),
+      };
+
+      return graduationData;
+    } catch (error: any) {
+      console.error(error);
+      throw new Error(`Failed to get graduation: ${error.message}`);
+    }
   }
 }
